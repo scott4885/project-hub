@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scott's Lab — Project Arcade</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --bg2: #0f172a;
+      --card: rgba(17, 24, 39, 0.72);
+      --border: rgba(148, 163, 184, 0.16);
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #22d3ee;
+      --accent2: #8b5cf6;
+      --glow: rgba(34, 211, 238, 0.25);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 700px at 80% -10%, rgba(139, 92, 246, 0.35), transparent),
+        radial-gradient(900px 600px at 10% 10%, rgba(34, 211, 238, 0.22), transparent),
+        linear-gradient(180deg, var(--bg), #07090d 70%);
+      min-height: 100vh;
+      padding: 48px 20px 64px;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; }
+    header {
+      display: flex; flex-direction: column; gap: 12px;
+      margin-bottom: 28px;
+    }
+    .eyebrow {
+      font-size: 12px; letter-spacing: 2px; text-transform: uppercase;
+      color: var(--muted);
+    }
+    h1 {
+      font-size: clamp(28px, 4vw, 48px);
+      line-height: 1.1;
+    }
+    .subtitle {
+      color: var(--muted);
+      font-size: clamp(14px, 2vw, 18px);
+      max-width: 720px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      position: relative;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 190px;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border 0.2s ease;
+      text-decoration: none;
+      color: inherit;
+      overflow: hidden;
+    }
+    .card::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(400px 200px at 80% 0%, rgba(139, 92, 246, 0.2), transparent);
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    .card:hover {
+      transform: translateY(-6px);
+      box-shadow: 0 18px 50px rgba(0,0,0,0.45), 0 0 0 1px rgba(34,211,238,0.3);
+      border-color: rgba(34, 211, 238, 0.45);
+    }
+    .card:hover::after { opacity: 1; }
+
+    .icon {
+      width: 48px; height: 48px; border-radius: 14px;
+      display: grid; place-items: center;
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.5), rgba(34, 211, 238, 0.45));
+      box-shadow: 0 10px 30px rgba(34, 211, 238, 0.2);
+      font-size: 22px;
+      z-index: 1;
+    }
+    .card h3 {
+      font-size: 18px; z-index: 1;
+    }
+    .card p {
+      color: var(--muted);
+      font-size: 14px;
+      z-index: 1;
+    }
+    .meta {
+      margin-top: auto;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12px; color: var(--muted);
+      z-index: 1;
+    }
+    .badge {
+      padding: 4px 8px; border-radius: 999px;
+      border: 1px solid rgba(34,211,238,0.4);
+      background: rgba(34,211,238,0.12);
+      color: #a5f3fc;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      font-size: 10px;
+    }
+    .soon {
+      border-color: rgba(148, 163, 184, 0.2);
+      box-shadow: none;
+      cursor: default;
+    }
+    .soon:hover { transform: none; box-shadow: none; }
+    .soon .badge {
+      border-color: rgba(148, 163, 184, 0.35);
+      background: rgba(148, 163, 184, 0.1);
+      color: #cbd5f5;
+    }
+    footer {
+      margin-top: 28px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="eyebrow">Project Arcade</div>
+      <h1>Scott's Lab</h1>
+      <p class="subtitle">A curated arcade of experiments, mini-games, and playful prototypes. Dive into neon vibes today and keep an eye out for the next drop.</p>
+    </header>
+
+    <section class="grid" id="projectGrid"></section>
+
+    <footer>New drops land here — each project lives in <code>/projects/&lt;name&gt;/</code>.</footer>
+  </div>
+
+  <script>
+    const projects = [
+      {
+        name: 'Pong Arcade',
+        description: '6 game modes, neon vibes, crunchy synth beeps.',
+        icon: '🏓',
+        href: 'projects/pong-game/index.html',
+        badge: 'Play now'
+      },
+      {
+        name: 'Pixel Runner',
+        description: 'Retro endless runner with power-ups and speed ramps.',
+        icon: '🟣',
+        comingSoon: true,
+        badge: 'Coming Soon'
+      },
+      {
+        name: 'Stellar Drift',
+        description: 'Drift through asteroid fields and rack up combos.',
+        icon: '🚀',
+        comingSoon: true,
+        badge: 'Coming Soon'
+      },
+      {
+        name: 'Synthwave Quiz',
+        description: 'A rapid-fire trivia blitz with neon score trails.',
+        icon: '💫',
+        comingSoon: true,
+        badge: 'Coming Soon'
+      }
+    ];
+
+    const grid = document.getElementById('projectGrid');
+
+    projects.forEach(project => {
+      const card = document.createElement(project.comingSoon ? 'div' : 'a');
+      card.className = `card ${project.comingSoon ? 'soon' : ''}`;
+      if (!project.comingSoon) {
+        card.href = project.href;
+        card.setAttribute('aria-label', `Open ${project.name}`);
+      }
+
+      card.innerHTML = `
+        <div class="icon">${project.icon}</div>
+        <h3>${project.name}</h3>
+        <p>${project.description}</p>
+        <div class="meta">
+          <span>${project.comingSoon ? 'In the lab' : 'Launchpad ready'}</span>
+          <span class="badge">${project.badge || ''}</span>
+        </div>
+      `;
+
+      grid.appendChild(card);
+    });
+  </script>
+</body>
+</html>
