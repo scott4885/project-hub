@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Stellar Drift</title>
+  <style>
+    :root {
+      --cyan: #39f6ff;
+      --purple: #b45cff;
+      --bg: #06070d;
+      --panel: rgba(10, 14, 28, 0.75);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100%; height: 100%; overflow: hidden; background: var(--bg);
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: white;
+      touch-action: none;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+    #overlay {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      pointer-events: none;
+    }
+    .panel {
+      pointer-events: auto;
+      background: var(--panel);
+      border: 1px solid rgba(57, 246, 255, 0.35);
+      box-shadow: 0 0 20px rgba(57, 246, 255, 0.25);
+      padding: 24px 28px;
+      border-radius: 14px;
+      text-align: center;
+      max-width: 520px;
+    }
+    h1 { font-size: 36px; letter-spacing: 2px; margin-bottom: 6px; color: var(--cyan); }
+    p { opacity: 0.85; line-height: 1.5; margin: 8px 0; }
+    .btn {
+      margin-top: 16px; display: inline-block; padding: 10px 18px; border-radius: 999px;
+      background: linear-gradient(120deg, var(--cyan), var(--purple)); color: #02040f;
+      font-weight: 700; letter-spacing: 1px; cursor: pointer; border: none;
+      text-transform: uppercase;
+    }
+    .hud {
+      position: fixed; top: 16px; left: 16px; display: flex; gap: 16px; flex-wrap: wrap;
+      font-size: 14px; pointer-events: none;
+    }
+    .hud div {
+      background: rgba(8, 10, 20, 0.6);
+      border: 1px solid rgba(180, 92, 255, 0.35);
+      padding: 8px 10px; border-radius: 10px;
+      box-shadow: 0 0 12px rgba(180, 92, 255, 0.15);
+    }
+    .badge { color: var(--cyan); font-weight: 700; }
+    #touchHint {
+      position: fixed; bottom: 16px; right: 16px; font-size: 12px; opacity: 0.6;
+      background: rgba(8, 10, 20, 0.5); padding: 6px 10px; border-radius: 10px;
+      border: 1px solid rgba(57, 246, 255, 0.2);
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div class="hud" id="hud">
+    <div>Score: <span class="badge" id="score">0</span></div>
+    <div>Combo: <span class="badge" id="combo">0</span></div>
+    <div>Multiplier: <span class="badge" id="multiplier">1.0x</span></div>
+    <div>Power: <span class="badge" id="power">None</span></div>
+  </div>
+  <div id="touchHint">Touch & drag to steer</div>
+  <div id="overlay">
+    <div class="panel" id="panel">
+      <h1>Stellar Drift</h1>
+      <p>Weave through drifting asteroid waves, rack up near-miss combos, and ride the neon slipstream.</p>
+      <p><strong>Controls:</strong> WASD / Arrow keys — or touch & drag on mobile.</p>
+      <p>Near misses boost your multiplier. Grab power-ups: shield, slow-motion, magnet.</p>
+      <button class="btn" id="startBtn">Start Drift</button>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('score');
+    const comboEl = document.getElementById('combo');
+    const multEl = document.getElementById('multiplier');
+    const powerEl = document.getElementById('power');
+    const overlay = document.getElementById('overlay');
+    const panel = document.getElementById('panel');
+    const startBtn = document.getElementById('startBtn');
+
+    let w, h, lastTime = 0;
+    const keys = {};
+    let pointer = { active: false, x: 0, y: 0 };
+
+    const state = {
+      running: false,
+      gameOver: false,
+      distance: 0,
+      scoreBonus: 0,
+      combo: 0,
+      maxCombo: 0,
+      multiplier: 1,
+      lastNearMiss: 0,
+      shield: 0,
+      slow: 0,
+      magnet: 0,
+      nextWave: 0,
+      nextPower: 0,
+      nextOrb: 0
+    };
+
+    const ship = {
+      x: 0,
+      y: 0,
+      r: 12,
+      speed: 280,
+      vx: 0,
+      vy: 0
+    };
+
+    const asteroids = [];
+    const particles = [];
+    const stars = [];
+    const powerUps = [];
+    const orbs = [];
+
+    function resize() {
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = window.innerWidth * ratio;
+      canvas.height = window.innerHeight * ratio;
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(ratio, ratio);
+      w = window.innerWidth;
+      h = window.innerHeight;
+    }
+
+    function initStars() {
+      stars.length = 0;
+      const count = Math.floor((w * h) / 8000);
+      for (let i = 0; i < count; i++) {
+        stars.push({
+          x: Math.random() * w,
+          y: Math.random() * h,
+          r: Math.random() * 1.5 + 0.5,
+          speed: Math.random() * 20 + 10
+        });
+      }
+    }
+
+    function resetGame() {
+      state.running = true;
+      state.gameOver = false;
+      state.distance = 0;
+      state.scoreBonus = 0;
+      state.combo = 0;
+      state.maxCombo = 0;
+      state.multiplier = 1;
+      state.lastNearMiss = 0;
+      state.shield = 0;
+      state.slow = 0;
+      state.magnet = 0;
+      state.nextWave = 0;
+      state.nextPower = 4;
+      state.nextOrb = 2;
+      asteroids.length = 0;
+      powerUps.length = 0;
+      orbs.length = 0;
+      particles.length = 0;
+      ship.x = w * 0.5;
+      ship.y = h * 0.7;
+    }
+
+    function startGame() {
+      overlay.style.display = 'none';
+      resetGame();
+      lastTime = performance.now();
+      requestAnimationFrame(loop);
+    }
+
+    function gameOver() {
+      state.running = false;
+      state.gameOver = true;
+      overlay.style.display = 'flex';
+      panel.innerHTML = `
+        <h1>Drift Lost</h1>
+        <p>Final score: <strong>${Math.floor(getScore())}</strong></p>
+        <p>Distance: ${Math.floor(state.distance)} km · Max Combo: ${state.maxCombo}</p>
+        <button class="btn" id="restartBtn">Drift Again</button>
+      `;
+      panel.querySelector('#restartBtn').onclick = startGame;
+    }
+
+    function spawnWave() {
+      const side = Math.random();
+      const count = 4 + Math.floor(Math.random() * 4);
+      const speed = 60 + Math.random() * 80;
+      let baseVx = 0, baseVy = 0, startX = 0, startY = 0;
+      if (side < 0.34) {
+        // from top
+        baseVy = speed;
+        baseVx = (Math.random() - 0.5) * speed * 0.6;
+        startY = -40;
+      } else if (side < 0.67) {
+        // from left
+        baseVx = speed;
+        baseVy = (Math.random() - 0.5) * speed * 0.6;
+        startX = -40;
+      } else {
+        // from right
+        baseVx = -speed;
+        baseVy = (Math.random() - 0.5) * speed * 0.6;
+        startX = w + 40;
+      }
+      for (let i = 0; i < count; i++) {
+        const offset = (i - count / 2) * (30 + Math.random() * 20);
+        const x = side < 0.34 ? (Math.random() * w) : startX;
+        const y = side < 0.34 ? startY : (Math.random() * h);
+        asteroids.push({
+          x: x + (side < 0.34 ? offset : 0),
+          y: y + (side >= 0.34 ? offset : 0),
+          r: 14 + Math.random() * 16,
+          vx: baseVx + (Math.random() - 0.5) * 20,
+          vy: baseVy + (Math.random() - 0.5) * 20,
+          rot: Math.random() * Math.PI * 2,
+          spin: (Math.random() - 0.5) * 1,
+          near: false
+        });
+      }
+    }
+
+    function spawnPowerUp() {
+      const types = ['shield', 'slow', 'magnet'];
+      const type = types[Math.floor(Math.random() * types.length)];
+      powerUps.push({
+        x: Math.random() * w * 0.8 + w * 0.1,
+        y: -30,
+        r: 14,
+        vy: 60 + Math.random() * 40,
+        type
+      });
+    }
+
+    function spawnOrb() {
+      orbs.push({
+        x: Math.random() * w,
+        y: -20,
+        r: 6,
+        vy: 50 + Math.random() * 60,
+        vx: (Math.random() - 0.5) * 30
+      });
+    }
+
+    function addTrail() {
+      particles.push({
+        x: ship.x,
+        y: ship.y + ship.r,
+        r: 3 + Math.random() * 4,
+        life: 0.6,
+        vx: (Math.random() - 0.5) * 20,
+        vy: 40 + Math.random() * 60,
+        color: Math.random() > 0.5 ? 'rgba(57,246,255,' : 'rgba(180,92,255,'
+      });
+    }
+
+    function nearMiss() {
+      const now = performance.now() / 1000;
+      if (now - state.lastNearMiss < 2.2) {
+        state.combo += 1;
+      } else {
+        state.combo = 1;
+      }
+      state.lastNearMiss = now;
+      state.multiplier = 1 + state.combo * 0.25;
+      state.maxCombo = Math.max(state.maxCombo, Math.floor(state.combo));
+    }
+
+    function activatePower(type) {
+      if (type === 'shield') state.shield = 10;
+      if (type === 'slow') state.slow = 6;
+      if (type === 'magnet') state.magnet = 7;
+    }
+
+    function getScore() {
+      return state.distance * state.multiplier + state.scoreBonus;
+    }
+
+    function update(dt) {
+      state.distance += dt * 90; // distance units
+
+      if (state.slow > 0) state.slow = Math.max(0, state.slow - dt);
+      if (state.shield > 0) state.shield = Math.max(0, state.shield - dt);
+      if (state.magnet > 0) state.magnet = Math.max(0, state.magnet - dt);
+
+      if (state.lastNearMiss && (performance.now() / 1000 - state.lastNearMiss) > 3) {
+        state.combo = 0;
+        state.multiplier = 1;
+      }
+
+      if (state.distance > state.nextWave) {
+        spawnWave();
+        state.nextWave = state.distance + 150 + Math.random() * 120;
+      }
+      if (state.distance > state.nextPower) {
+        spawnPowerUp();
+        state.nextPower = state.distance + 300 + Math.random() * 200;
+      }
+      if (state.distance > state.nextOrb) {
+        spawnOrb();
+        state.nextOrb = state.distance + 40 + Math.random() * 40;
+      }
+
+      const slowFactor = state.slow > 0 ? 0.55 : 1;
+
+      let ax = 0, ay = 0;
+      if (keys['ArrowUp'] || keys['KeyW']) ay -= 1;
+      if (keys['ArrowDown'] || keys['KeyS']) ay += 1;
+      if (keys['ArrowLeft'] || keys['KeyA']) ax -= 1;
+      if (keys['ArrowRight'] || keys['KeyD']) ax += 1;
+
+      if (pointer.active) {
+        const dx = pointer.x - ship.x;
+        const dy = pointer.y - ship.y;
+        const len = Math.hypot(dx, dy) || 1;
+        ax = dx / len;
+        ay = dy / len;
+      }
+
+      const speed = ship.speed;
+      ship.vx = ax * speed;
+      ship.vy = ay * speed;
+      ship.x += ship.vx * dt;
+      ship.y += ship.vy * dt;
+      ship.x = Math.max(ship.r + 8, Math.min(w - ship.r - 8, ship.x));
+      ship.y = Math.max(ship.r + 8, Math.min(h - ship.r - 8, ship.y));
+
+      if (Math.abs(ship.vx) + Math.abs(ship.vy) > 0.1) addTrail();
+
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.life -= dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.r *= 0.97;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+
+      for (let i = stars.length - 1; i >= 0; i--) {
+        const s = stars[i];
+        s.y += s.speed * dt * 0.2;
+        if (s.y > h) s.y = -10;
+      }
+
+      for (let i = asteroids.length - 1; i >= 0; i--) {
+        const a = asteroids[i];
+        a.x += a.vx * dt * slowFactor;
+        a.y += a.vy * dt * slowFactor;
+        a.rot += a.spin * dt;
+        if (a.x < -80 || a.x > w + 80 || a.y < -80 || a.y > h + 80) {
+          asteroids.splice(i, 1);
+          continue;
+        }
+        const dist = Math.hypot(a.x - ship.x, a.y - ship.y);
+        const collisionDist = a.r + ship.r;
+        if (dist < collisionDist) {
+          if (state.shield > 0) {
+            state.shield = 0;
+            asteroids.splice(i, 1);
+            continue;
+          } else {
+            gameOver();
+            return;
+          }
+        }
+        const nearDist = collisionDist + 22;
+        if (!a.near && dist < nearDist && dist >= collisionDist) {
+          a.near = true;
+          nearMiss();
+          state.scoreBonus += 15 * state.multiplier;
+        }
+      }
+
+      for (let i = powerUps.length - 1; i >= 0; i--) {
+        const p = powerUps[i];
+        p.y += p.vy * dt;
+        if (p.y > h + 40) {
+          powerUps.splice(i, 1);
+          continue;
+        }
+        if (Math.hypot(p.x - ship.x, p.y - ship.y) < p.r + ship.r + 6) {
+          activatePower(p.type);
+          powerUps.splice(i, 1);
+        }
+      }
+
+      for (let i = orbs.length - 1; i >= 0; i--) {
+        const o = orbs[i];
+        o.y += o.vy * dt;
+        o.x += o.vx * dt;
+        if (state.magnet > 0) {
+          const dx = ship.x - o.x;
+          const dy = ship.y - o.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < 200) {
+            o.x += dx * dt * 2.2;
+            o.y += dy * dt * 2.2;
+          }
+        }
+        if (o.y > h + 40 || o.x < -40 || o.x > w + 40) {
+          orbs.splice(i, 1);
+          continue;
+        }
+        if (Math.hypot(o.x - ship.x, o.y - ship.y) < o.r + ship.r + 4) {
+          state.scoreBonus += 50;
+          orbs.splice(i, 1);
+        }
+      }
+    }
+
+    function render() {
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#06070d';
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.save();
+      ctx.fillStyle = 'white';
+      for (const s of stars) {
+        ctx.globalAlpha = 0.6 + (s.speed / 40) * 0.4;
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+
+      for (const p of particles) {
+        ctx.save();
+        ctx.fillStyle = p.color + p.life + ')';
+        ctx.shadowColor = p.color + p.life + ')';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      for (const o of orbs) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(57,246,255,0.9)';
+        ctx.shadowColor = 'rgba(57,246,255,0.8)';
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      for (const p of powerUps) {
+        ctx.save();
+        const colors = {
+          shield: 'rgba(57,246,255,0.9)',
+          slow: 'rgba(180,92,255,0.9)',
+          magnet: 'rgba(120,255,180,0.9)'
+        };
+        ctx.fillStyle = colors[p.type];
+        ctx.shadowColor = colors[p.type];
+        ctx.shadowBlur = 16;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      for (const a of asteroids) {
+        ctx.save();
+        ctx.translate(a.x, a.y);
+        ctx.rotate(a.rot);
+        ctx.strokeStyle = 'rgba(180,92,255,0.8)';
+        ctx.lineWidth = 2;
+        ctx.shadowColor = 'rgba(57,246,255,0.5)';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        const spikes = 7;
+        for (let i = 0; i <= spikes; i++) {
+          const angle = (i / spikes) * Math.PI * 2;
+          const radius = a.r * (0.75 + Math.sin(angle * 2 + a.rot) * 0.2 + Math.random() * 0.05);
+          const x = Math.cos(angle) * radius;
+          const y = Math.sin(angle) * radius;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.save();
+      ctx.translate(ship.x, ship.y);
+      const angle = Math.atan2(ship.vy, ship.vx) + Math.PI / 2;
+      ctx.rotate(angle || 0);
+      ctx.fillStyle = 'rgba(57,246,255,0.9)';
+      ctx.shadowColor = 'rgba(57,246,255,0.9)';
+      ctx.shadowBlur = 20;
+      ctx.beginPath();
+      ctx.moveTo(0, -ship.r - 6);
+      ctx.lineTo(ship.r, ship.r + 6);
+      ctx.lineTo(0, ship.r - 2);
+      ctx.lineTo(-ship.r, ship.r + 6);
+      ctx.closePath();
+      ctx.fill();
+      if (state.shield > 0) {
+        ctx.strokeStyle = 'rgba(57,246,255,0.7)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, ship.r + 12, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      scoreEl.textContent = Math.floor(getScore());
+      comboEl.textContent = Math.floor(state.combo);
+      multEl.textContent = state.multiplier.toFixed(2) + 'x';
+      const powers = [];
+      if (state.shield > 0) powers.push('Shield');
+      if (state.slow > 0) powers.push('Slow');
+      if (state.magnet > 0) powers.push('Magnet');
+      powerEl.textContent = powers.length ? powers.join(' + ') : 'None';
+    }
+
+    function loop(timestamp) {
+      const dt = Math.min(0.033, (timestamp - lastTime) / 1000);
+      lastTime = timestamp;
+      if (state.running) {
+        update(dt);
+        render();
+        requestAnimationFrame(loop);
+      }
+    }
+
+    window.addEventListener('resize', () => {
+      resize();
+      initStars();
+    });
+
+    window.addEventListener('keydown', (e) => {
+      keys[e.code] = true;
+      if (!state.running && e.code === 'Space') startGame();
+    });
+    window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+    canvas.addEventListener('pointerdown', (e) => {
+      pointer.active = true;
+      pointer.x = e.clientX;
+      pointer.y = e.clientY;
+      if (!state.running) startGame();
+    });
+    canvas.addEventListener('pointermove', (e) => {
+      pointer.x = e.clientX;
+      pointer.y = e.clientY;
+    });
+    canvas.addEventListener('pointerup', () => { pointer.active = false; });
+    canvas.addEventListener('pointercancel', () => { pointer.active = false; });
+
+    startBtn.addEventListener('click', startGame);
+
+    resize();
+    initStars();
+    render();
+  </script>
+</body>
+</html>

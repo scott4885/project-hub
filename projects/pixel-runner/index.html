@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Pixel Runner</title>
+  <style>
+    :root {
+      --bg: #0b0b16;
+      --panel: #121228;
+      --cyan: #4ef3ff;
+      --purple: #9d4bff;
+      --pink: #ff4fd8;
+      --white: #e7f6ff;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; background: var(--bg); color: var(--white); font-family: "Press Start 2P", system-ui, sans-serif; }
+    body { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    #game-wrap {
+      position: relative;
+      width: min(100vw, 960px);
+      aspect-ratio: 16 / 9;
+      border: 2px solid rgba(78,243,255,0.4);
+      box-shadow: 0 0 25px rgba(157,75,255,0.25), inset 0 0 20px rgba(255,79,216,0.12);
+      background: radial-gradient(circle at top, #12122a 0%, #0b0b16 55%, #07070f 100%);
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    #ui {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+    #hud {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      font-size: 10px;
+      text-shadow: 0 0 6px rgba(78,243,255,0.7);
+      letter-spacing: 1px;
+      line-height: 1.6;
+    }
+    #powerups {
+      margin-top: 6px;
+      display: flex;
+      gap: 6px;
+      font-size: 8px;
+    }
+    .pill {
+      padding: 4px 6px;
+      border: 1px solid rgba(78,243,255,0.5);
+      border-radius: 3px;
+      background: rgba(18,18,40,0.6);
+    }
+    #overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      background: rgba(5,5,15,0.7);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    #overlay.active { opacity: 1; pointer-events: auto; }
+    #overlay .card {
+      padding: 20px 24px;
+      border: 2px solid rgba(255,79,216,0.65);
+      box-shadow: 0 0 20px rgba(78,243,255,0.3);
+      background: linear-gradient(135deg, rgba(18,18,40,0.95), rgba(10,10,20,0.95));
+    }
+    #overlay h1 { font-size: 14px; margin-bottom: 12px; color: var(--pink); }
+    #overlay p { font-size: 10px; margin-bottom: 12px; }
+    #restart {
+      pointer-events: auto;
+      margin-top: 6px;
+      padding: 8px 14px;
+      border: 1px solid var(--cyan);
+      background: rgba(78,243,255,0.15);
+      color: var(--white);
+      font-size: 10px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+    #restart:hover { background: rgba(78,243,255,0.3); }
+    #help {
+      position: absolute;
+      bottom: 10px;
+      right: 12px;
+      font-size: 8px;
+      opacity: 0.7;
+    }
+    @media (max-width: 700px) {
+      #hud { font-size: 8px; }
+      #help { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="game-wrap">
+    <canvas id="game" width="960" height="540"></canvas>
+    <div id="ui">
+      <div id="hud">
+        <div>Score: <span id="score">0</span></div>
+        <div>Speed: <span id="speed">0</span></div>
+        <div id="powerups">
+          <div class="pill" id="p-speed">BOOST</div>
+          <div class="pill" id="p-inv">INV</div>
+          <div class="pill" id="p-double">DOUBLE</div>
+        </div>
+      </div>
+      <div id="help">Tap to jump · Hold for higher jump</div>
+      <div id="overlay">
+        <div class="card">
+          <h1>GAME OVER</h1>
+          <p>Final Score: <span id="final-score">0</span></p>
+          <button id="restart">Restart</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+
+    const scoreEl = document.getElementById('score');
+    const speedEl = document.getElementById('speed');
+    const overlay = document.getElementById('overlay');
+    const finalScoreEl = document.getElementById('final-score');
+    const restartBtn = document.getElementById('restart');
+
+    const pillSpeed = document.getElementById('p-speed');
+    const pillInv = document.getElementById('p-inv');
+    const pillDouble = document.getElementById('p-double');
+
+    const state = {
+      running: true,
+      time: 0,
+      speed: 240,
+      baseSpeed: 240,
+      maxSpeed: 560,
+      distance: 0,
+      gravity: 2000,
+      groundY: 420,
+      score: 0,
+      spawnTimer: 0,
+      gapTimer: 0,
+      enemyTimer: 0,
+      powerTimer: 0,
+      invincible: 0,
+      speedBoost: 0,
+      doubleJump: 0,
+    };
+
+    const player = {
+      x: 160,
+      y: state.groundY - 48,
+      w: 26,
+      h: 48,
+      vy: 0,
+      onGround: true,
+      holding: false,
+      holdTime: 0,
+      holdMax: 0.18,
+      jumpCount: 0,
+      maxJumps: 1,
+    };
+
+    const obstacles = [];
+    const gaps = [];
+    const flyers = [];
+    const powerups = [];
+
+    function resetGame() {
+      state.running = true;
+      state.time = 0;
+      state.speed = state.baseSpeed;
+      state.distance = 0;
+      state.score = 0;
+      state.spawnTimer = 0;
+      state.gapTimer = 0;
+      state.enemyTimer = 0;
+      state.powerTimer = 0;
+      state.invincible = 0;
+      state.speedBoost = 0;
+      state.doubleJump = 0;
+      player.y = state.groundY - player.h;
+      player.vy = 0;
+      player.onGround = true;
+      player.holding = false;
+      player.holdTime = 0;
+      player.jumpCount = 0;
+      player.maxJumps = 1;
+      obstacles.length = 0;
+      gaps.length = 0;
+      flyers.length = 0;
+      powerups.length = 0;
+      overlay.classList.remove('active');
+    }
+
+    function spawnSpike() {
+      obstacles.push({
+        x: canvas.width + 20,
+        y: state.groundY - 26,
+        w: 26,
+        h: 26,
+        type: 'spike'
+      });
+    }
+
+    function spawnGap() {
+      const width = 80 + Math.random() * 90;
+      gaps.push({ x: canvas.width + 30, w: width });
+    }
+
+    function spawnFlyer() {
+      flyers.push({
+        x: canvas.width + 20,
+        y: state.groundY - 150 - Math.random() * 80,
+        w: 24,
+        h: 18,
+        bob: Math.random() * Math.PI * 2
+      });
+    }
+
+    function spawnPowerup() {
+      const types = ['speed', 'inv', 'double'];
+      const type = types[Math.floor(Math.random() * types.length)];
+      powerups.push({
+        x: canvas.width + 20,
+        y: state.groundY - 110 - Math.random() * 60,
+        w: 20,
+        h: 20,
+        type
+      });
+    }
+
+    function jump() {
+      if (player.onGround || player.jumpCount < player.maxJumps) {
+        player.vy = -680;
+        player.onGround = false;
+        player.jumpCount += 1;
+        player.holding = true;
+        player.holdTime = 0;
+      }
+    }
+
+    function update(dt) {
+      if (!state.running) return;
+      state.time += dt;
+
+      const speedRamp = 1 + state.time * 0.02;
+      const boost = state.speedBoost > 0 ? 1.45 : 1;
+      state.speed = Math.min(state.maxSpeed, state.baseSpeed * speedRamp) * boost;
+
+      state.distance += state.speed * dt;
+      state.score = Math.floor(state.distance / 10);
+
+      if (state.invincible > 0) state.invincible -= dt;
+      if (state.speedBoost > 0) state.speedBoost -= dt;
+      if (state.doubleJump > 0) state.doubleJump -= dt;
+
+      player.maxJumps = state.doubleJump > 0 ? 2 : 1;
+
+      player.vy += state.gravity * dt;
+      if (player.holding && player.holdTime < player.holdMax) {
+        player.vy -= 2200 * dt;
+        player.holdTime += dt;
+      }
+      player.y += player.vy * dt;
+
+      const groundBlocked = gaps.some(gap => player.x + player.w > gap.x && player.x < gap.x + gap.w);
+      if (!groundBlocked && player.y + player.h >= state.groundY) {
+        player.y = state.groundY - player.h;
+        player.vy = 0;
+        player.onGround = true;
+        player.jumpCount = 0;
+      } else if (player.y > canvas.height) {
+        endGame();
+      } else {
+        player.onGround = false;
+      }
+
+      state.spawnTimer -= dt;
+      state.gapTimer -= dt;
+      state.enemyTimer -= dt;
+      state.powerTimer -= dt;
+
+      if (state.spawnTimer <= 0) {
+        spawnSpike();
+        state.spawnTimer = 0.8 + Math.random() * 0.7;
+      }
+      if (state.gapTimer <= 0) {
+        spawnGap();
+        state.gapTimer = 1.6 + Math.random() * 1.2;
+      }
+      if (state.enemyTimer <= 0) {
+        spawnFlyer();
+        state.enemyTimer = 1.3 + Math.random() * 1.2;
+      }
+      if (state.powerTimer <= 0) {
+        spawnPowerup();
+        state.powerTimer = 4 + Math.random() * 4;
+      }
+
+      const moveBy = state.speed * dt;
+      for (const arr of [obstacles, gaps, flyers, powerups]) {
+        for (const item of arr) item.x -= moveBy;
+      }
+
+      while (obstacles.length && obstacles[0].x + obstacles[0].w < -20) obstacles.shift();
+      while (gaps.length && gaps[0].x + gaps[0].w < -20) gaps.shift();
+      while (flyers.length && flyers[0].x + flyers[0].w < -20) flyers.shift();
+      while (powerups.length && powerups[0].x + powerups[0].w < -20) powerups.shift();
+
+      for (const spike of obstacles) {
+        if (rectHit(player, spike)) {
+          if (state.invincible <= 0) {
+            endGame();
+          }
+        }
+      }
+      for (const flyer of flyers) {
+        if (rectHit(player, flyer)) {
+          if (state.invincible <= 0) {
+            endGame();
+          }
+        }
+      }
+      for (let i = powerups.length - 1; i >= 0; i--) {
+        const p = powerups[i];
+        if (rectHit(player, p)) {
+          applyPower(p.type);
+          powerups.splice(i, 1);
+        }
+      }
+    }
+
+    function applyPower(type) {
+      if (type === 'speed') {
+        state.speedBoost = 3.5;
+      } else if (type === 'inv') {
+        state.invincible = 4.5;
+      } else if (type === 'double') {
+        state.doubleJump = 6;
+      }
+    }
+
+    function rectHit(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function endGame() {
+      state.running = false;
+      finalScoreEl.textContent = state.score;
+      overlay.classList.add('active');
+    }
+
+    function drawBackground() {
+      ctx.fillStyle = '#0b0b16';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = 'rgba(157,75,255,0.12)';
+      for (let i = 0; i < 6; i++) {
+        ctx.fillRect((i * 160 + (state.time * 20) % 160) % canvas.width, 40 + i * 30, 80, 2);
+      }
+
+      ctx.fillStyle = '#10102a';
+      ctx.fillRect(0, state.groundY, canvas.width, canvas.height - state.groundY);
+
+      ctx.fillStyle = '#1a1a3d';
+      for (let x = 0; x < canvas.width; x += 48) {
+        ctx.fillRect(x + ((state.time * 60) % 48), state.groundY + 8, 22, 6);
+      }
+    }
+
+    function drawPlayer() {
+      const blink = state.invincible > 0 && Math.floor(state.time * 10) % 2 === 0;
+      ctx.fillStyle = blink ? '#ffffff' : '#4ef3ff';
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+      ctx.fillStyle = '#0b0b16';
+      ctx.fillRect(player.x + 6, player.y + 10, 6, 6);
+      ctx.fillRect(player.x + 16, player.y + 10, 6, 6);
+      ctx.fillStyle = '#ff4fd8';
+      ctx.fillRect(player.x + 8, player.y + 26, 10, 4);
+    }
+
+    function drawSpikes() {
+      ctx.fillStyle = '#ff4fd8';
+      for (const spike of obstacles) {
+        ctx.beginPath();
+        ctx.moveTo(spike.x, spike.y + spike.h);
+        ctx.lineTo(spike.x + spike.w / 2, spike.y);
+        ctx.lineTo(spike.x + spike.w, spike.y + spike.h);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    function drawGaps() {
+      ctx.fillStyle = '#05050d';
+      for (const gap of gaps) {
+        ctx.fillRect(gap.x, state.groundY, gap.w, canvas.height - state.groundY);
+        ctx.strokeStyle = '#9d4bff';
+        ctx.strokeRect(gap.x, state.groundY, gap.w, canvas.height - state.groundY);
+      }
+    }
+
+    function drawFlyers() {
+      ctx.fillStyle = '#9d4bff';
+      for (const flyer of flyers) {
+        flyer.bob += 0.1;
+        const y = flyer.y + Math.sin(flyer.bob) * 4;
+        ctx.fillRect(flyer.x, y, flyer.w, flyer.h);
+        ctx.fillStyle = '#4ef3ff';
+        ctx.fillRect(flyer.x - 6, y + 4, 6, 6);
+        ctx.fillRect(flyer.x + flyer.w, y + 4, 6, 6);
+        ctx.fillStyle = '#9d4bff';
+      }
+    }
+
+    function drawPowerups() {
+      for (const p of powerups) {
+        if (p.type === 'speed') ctx.fillStyle = '#4ef3ff';
+        if (p.type === 'inv') ctx.fillStyle = '#ff4fd8';
+        if (p.type === 'double') ctx.fillStyle = '#9d4bff';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#0b0b16';
+        ctx.fillRect(p.x + 6, p.y + 6, 8, 8);
+      }
+    }
+
+    function draw() {
+      drawBackground();
+      drawGaps();
+      drawSpikes();
+      drawFlyers();
+      drawPowerups();
+      drawPlayer();
+
+      scoreEl.textContent = state.score;
+      speedEl.textContent = Math.floor(state.speed);
+
+      pillSpeed.style.opacity = state.speedBoost > 0 ? 1 : 0.3;
+      pillInv.style.opacity = state.invincible > 0 ? 1 : 0.3;
+      pillDouble.style.opacity = state.doubleJump > 0 ? 1 : 0.3;
+    }
+
+    let last = performance.now();
+    function loop(now) {
+      const dt = Math.min(0.033, (now - last) / 1000);
+      last = now;
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    function handlePointerDown(e) {
+      e.preventDefault();
+      if (!state.running) return;
+      jump();
+    }
+    function handlePointerUp(e) {
+      e.preventDefault();
+      player.holding = false;
+      player.holdTime = player.holdMax;
+    }
+
+    canvas.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('pointerup', handlePointerUp);
+
+    restartBtn.addEventListener('click', () => {
+      resetGame();
+    });
+
+    resetGame();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
